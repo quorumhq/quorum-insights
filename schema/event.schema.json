@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quorumhq.xyz/schemas/insight-event/v1",
+  "title": "Quorum Insights Canonical Event",
+  "description": "The normalized event format that all Insights connectors produce. Every source (PostHog, Segment, Langfuse, warehouse) maps into this schema.",
+  "type": "object",
+  "required": ["tenant_id", "event_name", "event_type", "timestamp", "source_system"],
+  "properties": {
+    "tenant_id": {
+      "type": "string",
+      "description": "Multi-tenant isolation key"
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique event identifier (auto-generated if not provided)"
+    },
+    "user_id": {
+      "type": ["string", "null"],
+      "description": "Identified user ID from source system"
+    },
+    "anonymous_id": {
+      "type": ["string", "null"],
+      "description": "Pre-identification anonymous ID"
+    },
+    "event_name": {
+      "type": "string",
+      "description": "Original event name verbatim from source ('$pageview', 'Course Clicked', 'generation')"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": ["pageview", "identify", "track", "ai_generation", "ai_tool_call", "ai_retrieval", "session_start", "session_end", "group_identify"],
+      "description": "Normalized event type for analytics"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the event occurred (ISO 8601)"
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When Insights ingested the event (ISO 8601)"
+    },
+    "session_id": {
+      "type": ["string", "null"]
+    },
+    "page_url": {
+      "type": ["string", "null"],
+      "format": "uri"
+    },
+    "page_path": {
+      "type": ["string", "null"]
+    },
+    "referrer": {
+      "type": ["string", "null"]
+    },
+    "locale": {
+      "type": ["string", "null"],
+      "pattern": "^[a-z]{2}(-[A-Z]{2})?$",
+      "description": "e.g. 'en', 'en-US', 'fr-FR'"
+    },
+    "country": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Z]{2}$",
+      "description": "ISO 3166-1 alpha-2"
+    },
+    "device_type": {
+      "type": "string",
+      "enum": ["desktop", "mobile", "tablet", "server", "unknown"],
+      "default": "unknown"
+    },
+    "source_system": {
+      "type": "string",
+      "enum": ["posthog", "segment", "amplitude", "langfuse", "helicone", "warehouse", "quorum_accuracy", "custom"],
+      "description": "Which system generated this event"
+    },
+    "source_event_id": {
+      "type": ["string", "null"],
+      "description": "Original event ID from source system"
+    },
+    "properties": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "All source properties, stringified values. No data loss.",
+      "default": {}
+    },
+    "user_properties_set": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "User properties to set (from $set, identify traits)",
+      "default": {}
+    },
+    "user_properties_set_once": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "User properties to set only if not already set",
+      "default": {}
+    },
+    "group_type": { "type": ["string", "null"] },
+    "group_id": { "type": ["string", "null"] },
+    "group_properties": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "default": {}
+    },
+    "ai": {
+      "type": ["object", "null"],
+      "description": "AI-specific context. Populated from Langfuse/Helicone/Quorum Accuracy.",
+      "properties": {
+        "model": { "type": ["string", "null"], "description": "e.g. 'gpt-4o', 'claude-sonnet-4'" },
+        "provider": { "type": ["string", "null"], "description": "e.g. 'openai', 'anthropic'" },
+        "feature": { "type": ["string", "null"], "description": "Which product feature used AI" },
+        "quality_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "latency_ms": { "type": ["integer", "null"], "minimum": 0 },
+        "tokens_in": { "type": ["integer", "null"], "minimum": 0 },
+        "tokens_out": { "type": ["integer", "null"], "minimum": 0 },
+        "cost_usd": { "type": ["number", "null"], "minimum": 0 },
+        "trace_id": { "type": ["string", "null"] },
+        "generation_id": { "type": ["string", "null"] },
+        "verification_result": { "type": ["string", "null"], "enum": ["pass", "fail", "skip", null] },
+        "consensus_agreement": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "heal_triggered": { "type": ["boolean", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "utm_source": { "type": ["string", "null"] },
+    "utm_medium": { "type": ["string", "null"] },
+    "utm_campaign": { "type": ["string", "null"] },
+    "utm_term": { "type": ["string", "null"] },
+    "utm_content": { "type": ["string", "null"] }
+  },
+  "anyOf": [
+    { "required": ["user_id"] },
+    { "required": ["anonymous_id"] }
+  ],
+  "additionalProperties": false
+}
