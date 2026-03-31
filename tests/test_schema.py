@@ -7,7 +7,7 @@ from uuid import UUID
 
 import pytest
 
-from insights.schema.event import (
+from schema.event import (
     AIContext,
     DeviceType,
     EventType,
@@ -15,7 +15,7 @@ from insights.schema.event import (
     SourceSystem,
     UserProfile,
 )
-from insights.connectors.posthog_mapping import map_posthog_event, stringify_value
+from connectors.posthog_mapping import map_posthog_event, stringify_value
 
 
 # ─── Schema Tests ───
@@ -455,11 +455,11 @@ class TestJSONSchema:
     """Test the JSON schema validates correctly."""
 
     def test_schema_file_exists(self):
-        schema_path = Path(__file__).parent.parent.parent / "shared" / "schemas" / "event.schema.json"
+        schema_path = Path(__file__).parent.parent / "schema" / "event.schema.json"
         assert schema_path.exists(), f"Schema file not found at {schema_path}"
 
     def test_schema_is_valid_json(self):
-        schema_path = Path(__file__).parent.parent.parent / "shared" / "schemas" / "event.schema.json"
+        schema_path = Path(__file__).parent.parent / "schema" / "event.schema.json"
         with open(schema_path) as f:
             schema = json.load(f)
         assert schema["title"] == "Quorum Insights Canonical Event"

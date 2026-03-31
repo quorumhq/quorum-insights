@@ -32,7 +32,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from insights.schema.event import (
+from schema.event import (
     DeviceType,
     EventType,
     InsightEvent,
