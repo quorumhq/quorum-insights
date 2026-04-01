@@ -1,0 +1,87 @@
+# Quorum Insights — Standalone Deployment
+#
+# Usage:
+#   cp .env.example .env    # fill in your PostHog API key
+#   docker compose up -d    # start ClickHouse + run initial sync
+#
+# Services:
+#   clickhouse: analytics database (stores events + materialized views)
+#   insights:   CLI that syncs PostHog data, computes stats, generates insights
+
+services:
+  # ─── ClickHouse ───
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12-alpine
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native interface
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./schema/clickhouse.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    environment:
+      CLICKHOUSE_DB: insights
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  # ─── Insights CLI ───
+  insights:
+    build: .
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - CLICKHOUSE_HOST=clickhouse
+    volumes:
+      - insights_data:/data
+    command: >
+      run
+      --posthog-key=${POSTHOG_API_KEY:-}
+      --posthog-project=${POSTHOG_PROJECT_ID:-}
+      --posthog-host=${POSTHOG_HOST:-https://us.i.posthog.com}
+      --lookback-days=${LOOKBACK_DAYS:-90}
+      --anthropic-key=${ANTHROPIC_API_KEY:-}
+      --model=${LLM_MODEL:-claude-sonnet-4-20250514}
+      --prompt-version=${PROMPT_VERSION:-v2}
+      --max-insights=${MAX_INSIGHTS:-3}
+      --tenant=${TENANT_ID:-default}
+      --output=/data/digest.md
+
+  # ─── Cron Runner (optional) ───
+  # Uncomment to run insights on a schedule
+  # insights-cron:
+  #   build: .
+  #   depends_on:
+  #     clickhouse:
+  #       condition: service_healthy
+  #   env_file:
+  #     - .env
+  #   entrypoint: ["/bin/sh", "-c"]
+  #   command:
+  #     - |
+  #       while true; do
+  #         echo "Running insights digest at $$(date)"
+  #         python cli.py run \
+  #           --posthog-key=$${POSTHOG_API_KEY} \
+  #           --posthog-project=$${POSTHOG_PROJECT_ID} \
+  #           --anthropic-key=$${ANTHROPIC_API_KEY} \
+  #           --output=/data/digest.md
+  #         echo "Next run in 7 days"
+  #         sleep 604800
+  #       done
+  #   volumes:
+  #     - insights_data:/data
+
+volumes:
+  clickhouse_data:
+  insights_data:
