@@ -12,6 +12,7 @@ from stats.retention import RetentionComputer, RetentionResult, CohortRetention
 from stats.anomaly import AnomalyDetector, AnomalyResult, Anomaly, MetricSeries
 from stats.features import FeatureCorrelationAnalyzer, FeatureCorrelationResult, FeatureCorrelation
 from stats.activation import ActivationDiscovery, ActivationResult, ActivationMoment
+from stats.churn import ChurnDetector, ChurnResult, UserChurnRisk, DecayStage, ChurnSignal
 from stats.aggregator import StatsAggregator, StatsSummary, Finding, FindingSeverity, FindingCategory
 
 __all__ = [
@@ -28,6 +29,11 @@ __all__ = [
     "ActivationDiscovery",
     "ActivationResult",
     "ActivationMoment",
+    "ChurnDetector",
+    "ChurnResult",
+    "UserChurnRisk",
+    "DecayStage",
+    "ChurnSignal",
     "StatsAggregator",
     "StatsSummary",
     "Finding",
