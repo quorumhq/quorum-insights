@@ -179,9 +179,12 @@ class TestRetentionComputer:
         result = computer.compute(periods=[1, 7, 30])
 
         assert result.total_users == 1
-        assert result.overall_retention[1] == 1.0  # returned on D1
-        assert result.overall_retention[7] == 1.0  # returned on D7
-        assert result.overall_retention[30] == 0.0  # did not return on D30
+        # D1 retention: active in [1, 7) — day 1 qualifies
+        assert result.overall_retention[1] == 1.0
+        # D7 retention: active in [7, 30) — day 7 qualifies
+        assert result.overall_retention[7] == 1.0
+        # D30 retention: active on day >= 30 (last period, open-ended) — no activity
+        assert result.overall_retention[30] == 0.0
 
     def test_to_summary_format(self):
         events = _make_events(num_users=50, days=60)

@@ -1,13 +1,19 @@
--- Quorum Insights: ClickHouse Schema v2
+-- Quorum Insights: ClickHouse Schema v3
 --
 -- Design decisions:
---   1. AggregatingMergeTree MVs use -State/-Merge for correct incremental aggregation
---   2. events_recent (7-day TTL) for fast dashboards; insight_events for full history
---   3. Bloom filters on high-cardinality search columns
---   4. Projections for common access patterns
---   5. Retention/funnel/cohort use ClickHouse native functions at QUERY TIME
+--   1. All MVs use explicit TO <target_table> (never implicit inner tables)
+--   2. AggregatingMergeTree targets use -State/-Merge for correct incremental aggregation
+--   3. ORDER BY in target tables matches GROUP BY in MV SELECT
+--   4. events_recent (7-day TTL) for fast dashboards; insight_events for full history
+--   5. Bloom filters on high-cardinality search columns
+--   6. Retention/funnel/cohort use ClickHouse native functions at QUERY TIME
 --      (retention(), windowFunnel()) — not pre-materialized
---   6. Standalone mode (no AI fields required) + Quorum-enhanced mode (AI fields populated)
+--   7. Standalone mode (no AI fields required) + Quorum-enhanced mode (AI fields populated)
+--
+-- References:
+--   - BigData Boutique MV guide: always use TO, match ORDER BY to GROUP BY
+--   - ClickHouse official blog: single sparse events table, MVs for common access patterns
+--   - ChistaDATA: AggregateFunction types with -State/-Merge pairs
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- Main Events Table
@@ -127,15 +133,27 @@ FROM insight_events;
 
 
 -- ═══════════════════════════════════════════════════════════════════════
--- User Profiles (AggregatingMergeTree — proper -State/-Merge)
+-- User Profiles (AggregatingMergeTree — explicit target table)
 -- ═══════════════════════════════════════════════════════════════════════
 -- Query with: SELECT tenant_id, user_id,
 --   minMerge(first_seen), maxMerge(last_seen), countMerge(event_count), ...
--- FROM user_profiles_mv GROUP BY tenant_id, user_id
+-- FROM user_profiles GROUP BY tenant_id, user_id
+
+CREATE TABLE IF NOT EXISTS user_profiles (
+    tenant_id                       String,
+    user_id                         String,
+    first_seen                      AggregateFunction(min, DateTime64(3, 'UTC')),
+    last_seen                       AggregateFunction(max, DateTime64(3, 'UTC')),
+    event_count                     AggregateFunction(count),
+    ai_events_count                 AggregateFunction(countIf, UInt8),
+    ai_avg_quality                  AggregateFunction(avgIf, Float32, UInt8),
+    ai_features_used                AggregateFunction(groupUniqArrayIf, LowCardinality(String), UInt8),
+    source_systems                  AggregateFunction(groupUniqArray, LowCardinality(String))
+) ENGINE = AggregatingMergeTree()
+ORDER BY (tenant_id, user_id);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS user_profiles_mv
-ENGINE = AggregatingMergeTree()
-ORDER BY (tenant_id, user_id)
+TO user_profiles
 AS SELECT
     tenant_id,
     user_id,
@@ -152,16 +170,24 @@ GROUP BY tenant_id, user_id;
 
 
 -- ═══════════════════════════════════════════════════════════════════════
--- Daily Metrics (AggregatingMergeTree)
+-- Daily Metrics (AggregatingMergeTree — explicit target table)
 -- Pre-aggregated daily metrics per tenant for fast trend queries.
 -- ═══════════════════════════════════════════════════════════════════════
--- Query with: SELECT tenant_id, event_date, event_type,
---   countMerge(event_count), uniqMerge(unique_users), ...
--- FROM daily_metrics_mv GROUP BY tenant_id, event_date, event_type
+
+CREATE TABLE IF NOT EXISTS daily_metrics (
+    tenant_id                       String,
+    event_date                      Date,
+    event_type                      LowCardinality(String),
+    event_count                     AggregateFunction(count),
+    unique_users                    AggregateFunction(uniq, String),
+    unique_sessions                 AggregateFunction(uniq, String),
+    ai_events                       AggregateFunction(countIf, UInt8),
+    avg_ai_quality                  AggregateFunction(avgIf, Float32, UInt8)
+) ENGINE = AggregatingMergeTree()
+ORDER BY (tenant_id, event_date, event_type);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS daily_metrics_mv
-ENGINE = AggregatingMergeTree()
-ORDER BY (tenant_id, event_date, event_type)
+TO daily_metrics
 AS SELECT
     tenant_id,
     event_date,
@@ -176,14 +202,21 @@ GROUP BY tenant_id, event_date, event_type;
 
 
 -- ═══════════════════════════════════════════════════════════════════════
--- User Cohorts (AggregatingMergeTree)
+-- User Cohorts (AggregatingMergeTree — explicit target table)
 -- First-seen date per user, for retention curve computation.
--- Used by query-layer retention functions that JOIN this with events.
 -- ═══════════════════════════════════════════════════════════════════════
 
+CREATE TABLE IF NOT EXISTS user_cohorts (
+    tenant_id                       String,
+    user_id                         String,
+    cohort_date                     AggregateFunction(min, Date),
+    last_active_date                AggregateFunction(max, Date),
+    lifetime_events                 AggregateFunction(count)
+) ENGINE = AggregatingMergeTree()
+ORDER BY (tenant_id, user_id);
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS user_cohorts_mv
-ENGINE = AggregatingMergeTree()
-ORDER BY (tenant_id, user_id)
+TO user_cohorts
 AS SELECT
     tenant_id,
     user_id,
@@ -196,13 +229,24 @@ GROUP BY tenant_id, user_id;
 
 
 -- ═══════════════════════════════════════════════════════════════════════
--- Feature Usage (AggregatingMergeTree)
--- Per-feature usage and AI quality for feature impact analysis.
+-- Feature Usage (AggregatingMergeTree — explicit target table)
+-- Per-feature usage and AI quality for feature correlation analysis.
 -- ═══════════════════════════════════════════════════════════════════════
 
+CREATE TABLE IF NOT EXISTS feature_usage (
+    tenant_id                       String,
+    event_date                      Date,
+    event_name                      String,
+    usage_count                     AggregateFunction(count),
+    unique_users                    AggregateFunction(uniq, String),
+    ai_events                       AggregateFunction(countIf, UInt8),
+    avg_ai_quality                  AggregateFunction(avgIf, Float32, UInt8),
+    total_ai_cost                   AggregateFunction(sumIf, Float32, UInt8)
+) ENGINE = AggregatingMergeTree()
+ORDER BY (tenant_id, event_date, event_name);
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS feature_usage_mv
-ENGINE = AggregatingMergeTree()
-ORDER BY (tenant_id, event_date, event_name)
+TO feature_usage
 AS SELECT
     tenant_id,
     event_date,
@@ -241,7 +285,8 @@ ALTER TABLE insight_events MATERIALIZE PROJECTION proj_dau;
 -- queries that don't benefit from pre-materialization:
 --
 -- 1. RETENTION: retention(cond1, cond2, ..., condN) function
---    Returns array[N] with 1/0 for each condition met per user.
+--    Each condition checks a BOUNDED time range (not >=).
+--    E.g. retention(event_date BETWEEN cohort+0w AND cohort+1w, ...)
 --    Grouped by cohort_week to build retention matrices.
 --
 -- 2. FUNNELS: windowFunnel(window)(timestamp, cond1, cond2, ..., condN)
@@ -249,6 +294,6 @@ ALTER TABLE insight_events MATERIALIZE PROJECTION proj_dau;
 --    Grouped by date/segment for conversion analysis.
 --
 -- 3. COHORT ANALYSIS: GROUP BY toStartOfWeek(first_event_date)
---    Uses user_cohorts_mv for first-seen dates joined with events.
+--    Uses user_cohorts for first-seen dates joined with events.
 --
 -- See insights/query/ Python module for parameterized query builders.

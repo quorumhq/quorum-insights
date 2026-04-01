@@ -10,7 +10,7 @@ Produces structured summaries ready for the LLM insight engine.
 
 from stats.retention import RetentionComputer, RetentionResult, CohortRetention
 from stats.anomaly import AnomalyDetector, AnomalyResult, Anomaly, MetricSeries
-from stats.features import FeatureImpactAnalyzer, FeatureImpactResult, FeatureImpact
+from stats.features import FeatureCorrelationAnalyzer, FeatureCorrelationResult, FeatureCorrelation
 from stats.aggregator import StatsAggregator, StatsSummary, Finding, FindingSeverity, FindingCategory
 
 __all__ = [
@@ -21,9 +21,9 @@ __all__ = [
     "AnomalyResult",
     "Anomaly",
     "MetricSeries",
-    "FeatureImpactAnalyzer",
-    "FeatureImpactResult",
-    "FeatureImpact",
+    "FeatureCorrelationAnalyzer",
+    "FeatureCorrelationResult",
+    "FeatureCorrelation",
     "StatsAggregator",
     "StatsSummary",
     "Finding",

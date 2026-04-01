@@ -1,8 +1,8 @@
 """
 Metrics query builder — reads from pre-aggregated materialized views.
 
-These queries use the AggregatingMergeTree MVs with -Merge combinators
-for fast dashboard rendering. No full table scans.
+These queries read from explicit AggregatingMergeTree target tables
+(not the MV definitions) with -Merge combinators for fast dashboards.
 
 Usage:
     q = MetricsQuery(tenant_id="t1", start_date=date(2026, 1, 1), end_date=date(2026, 3, 31))
@@ -20,7 +20,7 @@ from typing import Optional
 
 @dataclass
 class MetricsQuery:
-    """Build queries against pre-aggregated ClickHouse MVs."""
+    """Build queries against pre-aggregated ClickHouse target tables."""
 
     tenant_id: str
     start_date: date
@@ -34,12 +34,12 @@ class MetricsQuery:
         }
 
     def daily_active_users(self) -> tuple[str, dict]:
-        """DAU from daily_metrics_mv (AggregatingMergeTree)."""
+        """DAU from daily_metrics (AggregatingMergeTree target)."""
         sql = """
 SELECT
     event_date,
     uniqMerge(unique_users) AS dau
-FROM daily_metrics_mv
+FROM daily_metrics
 WHERE tenant_id = {tenant_id:String}
     AND event_date >= {start_date:Date}
     AND event_date <= {end_date:Date}
@@ -49,7 +49,7 @@ ORDER BY event_date
         return sql.strip(), self._params()
 
     def daily_metrics_by_type(self) -> tuple[str, dict]:
-        """Daily metrics broken down by event_type from daily_metrics_mv."""
+        """Daily metrics broken down by event_type from daily_metrics."""
         sql = """
 SELECT
     event_date,
@@ -59,7 +59,7 @@ SELECT
     uniqMerge(unique_sessions) AS sessions,
     countMerge(ai_events) AS ai_events,
     avgMerge(avg_ai_quality) AS avg_ai_quality
-FROM daily_metrics_mv
+FROM daily_metrics
 WHERE tenant_id = {tenant_id:String}
     AND event_date >= {start_date:Date}
     AND event_date <= {end_date:Date}
@@ -69,7 +69,7 @@ ORDER BY event_date, event_type
         return sql.strip(), self._params()
 
     def feature_usage_ranking(self, limit: int = 50) -> tuple[str, dict]:
-        """Top features by unique users from feature_usage_mv."""
+        """Top features by unique users from feature_usage."""
         sql = f"""
 SELECT
     event_name,
@@ -78,7 +78,7 @@ SELECT
     countMerge(ai_events) AS ai_events,
     avgMerge(avg_ai_quality) AS avg_ai_quality,
     sumMerge(total_ai_cost) AS total_ai_cost
-FROM feature_usage_mv
+FROM feature_usage
 WHERE tenant_id = {{tenant_id:String}}
     AND event_date >= {{start_date:Date}}
     AND event_date <= {{end_date:Date}}
@@ -89,7 +89,7 @@ LIMIT {limit}
         return sql.strip(), self._params()
 
     def feature_trend(self, event_name: str) -> tuple[str, dict]:
-        """Daily trend for a specific feature from feature_usage_mv."""
+        """Daily trend for a specific feature from feature_usage."""
         params = self._params()
         params["event_name"] = event_name
 
@@ -99,7 +99,7 @@ SELECT
     uniqMerge(unique_users) AS unique_users,
     countMerge(usage_count) AS total_usage,
     avgMerge(avg_ai_quality) AS avg_ai_quality
-FROM feature_usage_mv
+FROM feature_usage
 WHERE tenant_id = {tenant_id:String}
     AND event_date >= {start_date:Date}
     AND event_date <= {end_date:Date}
@@ -110,7 +110,7 @@ ORDER BY event_date
         return sql.strip(), params
 
     def user_profile(self, user_id: str) -> tuple[str, dict]:
-        """Single user profile from user_profiles_mv."""
+        """Single user profile from user_profiles."""
         params = self._params()
         params["user_id"] = user_id
 
@@ -125,7 +125,7 @@ SELECT
     avgMerge(ai_avg_quality) AS ai_avg_quality,
     groupUniqArrayMerge(ai_features_used) AS ai_features_used,
     groupUniqArrayMerge(source_systems) AS source_systems
-FROM user_profiles_mv
+FROM user_profiles
 WHERE tenant_id = {tenant_id:String}
     AND user_id = {user_id:String}
 GROUP BY tenant_id, user_id
@@ -133,7 +133,7 @@ GROUP BY tenant_id, user_id
         return sql.strip(), params
 
     def user_cohort_info(self, user_id: str) -> tuple[str, dict]:
-        """User cohort data from user_cohorts_mv."""
+        """User cohort data from user_cohorts."""
         params = self._params()
         params["user_id"] = user_id
 
@@ -144,7 +144,7 @@ SELECT
     minMerge(cohort_date) AS cohort_date,
     maxMerge(last_active_date) AS last_active_date,
     countMerge(lifetime_events) AS lifetime_events
-FROM user_cohorts_mv
+FROM user_cohorts
 WHERE tenant_id = {tenant_id:String}
     AND user_id = {user_id:String}
 GROUP BY tenant_id, user_id
@@ -160,7 +160,7 @@ SELECT
     uniqMerge(unique_sessions) AS total_sessions,
     countMerge(ai_events) AS total_ai_events,
     avgMerge(avg_ai_quality) AS overall_avg_ai_quality
-FROM daily_metrics_mv
+FROM daily_metrics
 WHERE tenant_id = {tenant_id:String}
     AND event_date >= {start_date:Date}
     AND event_date <= {end_date:Date}

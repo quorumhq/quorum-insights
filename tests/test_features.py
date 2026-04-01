@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import polars as pl
 import pytest
 
-from stats.features import FeatureImpactAnalyzer, FeatureImpactResult, FeatureImpact
+from stats.features import FeatureCorrelationAnalyzer, FeatureCorrelationResult, FeatureCorrelation
 
 
 # ─── Test Data Helpers ───
@@ -160,15 +160,15 @@ def _make_segmented_events(num_users: int = 200) -> pl.DataFrame:
 # ─── Tests ───
 
 
-class TestFeatureImpactAnalyzer:
+class TestFeatureCorrelationAnalyzer:
     """Test feature impact correlation."""
 
     def test_basic_analysis(self):
         events = _make_feature_events(num_users=200)
-        analyzer = FeatureImpactAnalyzer(events)
+        analyzer = FeatureCorrelationAnalyzer(events)
         result = analyzer.analyze(retention_periods=[7, 30])
 
-        assert isinstance(result, FeatureImpactResult)
+        assert isinstance(result, FeatureCorrelationResult)
         assert result.total_users > 0
         assert result.total_features > 0
         assert result.periods == [7, 30]
@@ -176,7 +176,7 @@ class TestFeatureImpactAnalyzer:
     def test_good_feature_positive_impact(self):
         """good_feature should have positive retention impact."""
         events = _make_feature_events(num_users=300)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=3)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=3)
         result = analyzer.analyze(retention_periods=[7])
 
         good = next((f for f in result.features if f.feature_name == "good_feature"), None)
@@ -186,7 +186,7 @@ class TestFeatureImpactAnalyzer:
     def test_bad_feature_negative_impact(self):
         """bad_feature should have negative retention impact."""
         events = _make_feature_events(num_users=300)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=3)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=3)
         result = analyzer.analyze(retention_periods=[7])
 
         bad = next((f for f in result.features if f.feature_name == "bad_feature"), None)
@@ -195,7 +195,7 @@ class TestFeatureImpactAnalyzer:
 
     def test_negative_features_flagged(self):
         events = _make_feature_events(num_users=300)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=3)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=3)
         result = analyzer.analyze(retention_periods=[7, 30])
 
         assert len(result.negative_features) >= 1
@@ -205,16 +205,16 @@ class TestFeatureImpactAnalyzer:
     def test_ranking_order(self):
         """Ranked features should be sorted by net impact (best first)."""
         events = _make_feature_events(num_users=200)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=3)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=3)
         result = analyzer.analyze(retention_periods=[7, 30])
 
         ranked = result.ranked
         for i in range(len(ranked) - 1):
-            assert ranked[i].net_impact_score >= ranked[i + 1].net_impact_score
+            assert ranked[i].net_correlation_score >= ranked[i + 1].net_correlation_score
 
     def test_retention_rates_bounded(self):
         events = _make_feature_events(num_users=200)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=3)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=3)
         result = analyzer.analyze(retention_periods=[7])
 
         for f in result.features:
@@ -224,7 +224,7 @@ class TestFeatureImpactAnalyzer:
 
     def test_normalized_impact_exists(self):
         events = _make_feature_events(num_users=200)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=3)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=3)
         result = analyzer.analyze(retention_periods=[7])
 
         for f in result.features:
@@ -232,7 +232,7 @@ class TestFeatureImpactAnalyzer:
 
     def test_exclude_events(self):
         events = _make_feature_events(num_users=100)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=3)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=3)
         result = analyzer.analyze(exclude_events=["signup", "pageview", "click"])
 
         feature_names = {f.feature_name for f in result.features}
@@ -241,7 +241,7 @@ class TestFeatureImpactAnalyzer:
 
     def test_min_feature_users_filter(self):
         events = _make_feature_events(num_users=50)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=100)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=100)
         result = analyzer.analyze()
 
         # With only 50 users, no feature should have 100+ users
@@ -253,7 +253,7 @@ class TestFeatureImpactAnalyzer:
             "event_date": [],
             "event_name": [],
         }).cast({"user_id": pl.Utf8, "event_date": pl.Date, "event_name": pl.Utf8})
-        analyzer = FeatureImpactAnalyzer(events)
+        analyzer = FeatureCorrelationAnalyzer(events)
         result = analyzer.analyze()
 
         assert result.total_users == 0
@@ -270,13 +270,13 @@ class TestFeatureImpactAnalyzer:
             {"user_id": "u5", "event_date": date(2026, 1, 1), "event_name": "signup"},
             {"user_id": "u6", "event_date": date(2026, 1, 1), "event_name": "signup"},
         ]
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=1, min_non_users=1)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=1, min_non_users=1)
         result = analyzer.analyze(retention_periods=[7])
         assert result.total_users >= 1
 
     def test_ai_quality_scores(self):
         events = _make_feature_events_with_ai(num_users=100)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=3)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=3)
         result = analyzer.analyze(retention_periods=[7])
 
         ai_feature = next((f for f in result.features if f.feature_name == "ai_search"), None)
@@ -286,11 +286,11 @@ class TestFeatureImpactAnalyzer:
             assert ai_feature.ai_event_pct > 0
 
 
-class TestFeatureImpact:
-    """Test FeatureImpact dataclass."""
+class TestFeatureCorrelation:
+    """Test FeatureCorrelation dataclass."""
 
     def test_is_negative(self):
-        fi = FeatureImpact(
+        fi = FeatureCorrelation(
             feature_name="bad",
             total_users=100,
             total_events=200,
@@ -302,7 +302,7 @@ class TestFeatureImpact:
         assert fi.is_negative
 
     def test_is_not_negative(self):
-        fi = FeatureImpact(
+        fi = FeatureCorrelation(
             feature_name="good",
             total_users=100,
             total_events=200,
@@ -313,8 +313,8 @@ class TestFeatureImpact:
         )
         assert not fi.is_negative
 
-    def test_net_impact_score_weighted(self):
-        fi = FeatureImpact(
+    def test_net_correlation_score_weighted(self):
+        fi = FeatureCorrelation(
             feature_name="test",
             total_users=100,
             total_events=200,
@@ -323,12 +323,12 @@ class TestFeatureImpact:
             retention_non_users={7: 0.3, 30: 0.20},
             normalized_impact={7: 0.1, 30: 0.05},
         )
-        score = fi.net_impact_score
+        score = fi.net_correlation_score
         # D30 weighted 2x, D7 weighted 1x: (0.1*1 + 0.05*2) / 3 = 0.0667
         assert abs(score - 0.0667) < 0.01
 
     def test_empty_normalized_impact(self):
-        fi = FeatureImpact(
+        fi = FeatureCorrelation(
             feature_name="empty",
             total_users=0,
             total_events=0,
@@ -337,20 +337,20 @@ class TestFeatureImpact:
             retention_non_users={},
             normalized_impact={},
         )
-        assert fi.net_impact_score == 0.0
+        assert fi.net_correlation_score == 0.0
         assert not fi.is_negative
 
 
-class TestFeatureImpactResult:
-    """Test FeatureImpactResult."""
+class TestFeatureCorrelationResult:
+    """Test FeatureCorrelationResult."""
 
     def test_to_summary_format(self):
         events = _make_feature_events(num_users=200)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=3)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=3)
         result = analyzer.analyze(retention_periods=[7, 30])
         summary = result.to_summary()
 
-        assert summary["metric"] == "feature_impact"
+        assert summary["metric"] == "feature_correlation"
         assert "date_range" in summary
         assert "total_users" in summary
         assert "positive_count" in summary
@@ -360,7 +360,7 @@ class TestFeatureImpactResult:
 
     def test_top_features_limited_to_10(self):
         events = _make_feature_events(num_users=200)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=3)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=3)
         result = analyzer.analyze()
         summary = result.to_summary()
 
@@ -368,8 +368,8 @@ class TestFeatureImpactResult:
 
     def test_positive_features_property(self):
         events = _make_feature_events(num_users=200)
-        analyzer = FeatureImpactAnalyzer(events, min_feature_users=3)
+        analyzer = FeatureCorrelationAnalyzer(events, min_feature_users=3)
         result = analyzer.analyze(retention_periods=[7])
 
         for f in result.positive_features:
-            assert f.net_impact_score > 0.01
+            assert f.net_correlation_score > 0.01

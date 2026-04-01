@@ -16,7 +16,7 @@ Usage:
     agg = StatsAggregator()
     agg.add_retention(retention_result)
     agg.add_anomalies(anomaly_result)
-    agg.add_feature_impact(feature_result)
+    agg.add_feature_correlation(feature_result)
     summary = agg.build()
     summary.to_dict()  # -> structured dict for LLM
 """
@@ -45,7 +45,7 @@ class FindingCategory(str, Enum):
     """Category of finding."""
     RETENTION = "retention"
     ANOMALY = "anomaly"
-    FEATURE_IMPACT = "feature_impact"
+    FEATURE_CORRELATION = "feature_correlation"
     ACTIVATION = "activation"
     CHURN = "churn"
     OVERVIEW = "overview"
@@ -222,11 +222,11 @@ class StatsAggregator:
 
         return self
 
-    def add_feature_impact(self, summary: dict) -> StatsAggregator:
+    def add_feature_correlation(self, summary: dict) -> StatsAggregator:
         """Add feature impact analysis results."""
         self._feature_summary = summary
-        self._raw["feature_impact"] = summary
-        self._freshness.modules_available.append("feature_impact")
+        self._raw["feature_correlation"] = summary
+        self._freshness.modules_available.append("feature_correlation")
 
         dr = summary.get("date_range", {})
         self._update_date_range(dr.get("start"), dr.get("end"))
@@ -241,7 +241,7 @@ class StatsAggregator:
         self._findings = []
 
         # Track missing modules
-        all_modules = ["retention", "anomaly", "feature_impact"]
+        all_modules = ["retention", "anomaly", "feature_correlation"]
         self._freshness.modules_missing = [
             m for m in all_modules if m not in self._freshness.modules_available
         ]
@@ -362,7 +362,7 @@ class StatsAggregator:
             impact_str = ", ".join(f"{k}: {v:+.1%}" for k, v in impact_vals.items())
 
             self._findings.append(Finding(
-                category=FindingCategory.FEATURE_IMPACT,
+                category=FindingCategory.FEATURE_CORRELATION,
                 severity=FindingSeverity.MEDIUM,
                 title=f"Top Feature: {f.get('name', '?')} ({f.get('users', 0)} users)",
                 description=f"Retention impact: {impact_str}",
@@ -383,7 +383,7 @@ class StatsAggregator:
             impact_str = ", ".join(f"{k}: {v:+.1%}" for k, v in impact_vals.items())
 
             self._findings.append(Finding(
-                category=FindingCategory.FEATURE_IMPACT,
+                category=FindingCategory.FEATURE_CORRELATION,
                 severity=FindingSeverity.HIGH,
                 title=f"⚠ Negative Impact: {f.get('name', '?')}",
                 description=f"Users of this feature have LOWER retention: {impact_str}. "

@@ -16,7 +16,7 @@ from stats.aggregator import (
 )
 from stats.retention import RetentionComputer
 from stats.anomaly import AnomalyDetector, MetricSeries
-from stats.features import FeatureImpactAnalyzer
+from stats.features import FeatureCorrelationAnalyzer
 
 
 # ─── Test Data Helpers ───
@@ -79,7 +79,7 @@ def _anomaly_summary() -> dict:
 def _feature_summary() -> dict:
     """Realistic feature impact summary."""
     return {
-        "metric": "feature_impact",
+        "metric": "feature_correlation",
         "date_range": {"start": "2026-01-01", "end": "2026-03-31"},
         "total_users": 500,
         "total_features": 5,
@@ -109,7 +109,7 @@ class TestStatsAggregator:
         agg = StatsAggregator()
         agg.add_retention(_retention_summary())
         agg.add_anomalies(_anomaly_summary())
-        agg.add_feature_impact(_feature_summary())
+        agg.add_feature_correlation(_feature_summary())
         summary = agg.build()
 
         assert isinstance(summary, StatsSummary)
@@ -120,7 +120,7 @@ class TestStatsAggregator:
         agg = StatsAggregator()
         agg.add_retention(_retention_summary())
         agg.add_anomalies(_anomaly_summary())
-        agg.add_feature_impact(_feature_summary())
+        agg.add_feature_correlation(_feature_summary())
         summary = agg.build()
 
         scores = [f.rank_score for f in summary.findings]
@@ -139,11 +139,11 @@ class TestStatsAggregator:
 
     def test_negative_features_flagged(self):
         agg = StatsAggregator()
-        agg.add_feature_impact(_feature_summary())
+        agg.add_feature_correlation(_feature_summary())
         summary = agg.build()
 
         negative = [f for f in summary.findings
-                    if f.category == FindingCategory.FEATURE_IMPACT
+                    if f.category == FindingCategory.FEATURE_CORRELATION
                     and f.severity == FindingSeverity.HIGH
                     and "Negative" in f.title]
         assert len(negative) >= 1
@@ -157,7 +157,7 @@ class TestStatsAggregator:
         assert summary.finding_count >= 1
         assert "retention" in summary.freshness.modules_available
         assert "anomaly" in summary.freshness.modules_missing
-        assert "feature_impact" in summary.freshness.modules_missing
+        assert "feature_correlation" in summary.freshness.modules_missing
 
     def test_anomaly_only(self):
         agg = StatsAggregator()
@@ -198,11 +198,11 @@ class TestStatsAggregator:
         summary_data["negative_features"][0]["impact"] = {"D7": -0.005}
 
         agg = StatsAggregator(min_impact_threshold=0.02)
-        agg.add_feature_impact(summary_data)
+        agg.add_feature_correlation(summary_data)
         summary = agg.build()
 
         feature_findings = [f for f in summary.findings
-                           if f.category == FindingCategory.FEATURE_IMPACT]
+                           if f.category == FindingCategory.FEATURE_CORRELATION]
         assert len(feature_findings) == 0
 
     def test_date_range_merged(self):
@@ -219,7 +219,7 @@ class TestStatsAggregator:
     def test_user_count_max(self):
         agg = StatsAggregator()
         agg.add_retention({"date_range": {}, "total_users": 500, "overall_retention": {}})
-        agg.add_feature_impact({"date_range": {}, "total_users": 300,
+        agg.add_feature_correlation({"date_range": {}, "total_users": 300,
                                "top_features": [], "negative_features": []})
         summary = agg.build()
 
@@ -231,7 +231,7 @@ class TestStatsAggregator:
             StatsAggregator()
             .add_retention(_retention_summary())
             .add_anomalies(_anomaly_summary())
-            .add_feature_impact(_feature_summary())
+            .add_feature_correlation(_feature_summary())
             .build()
         )
         assert summary.finding_count > 0
@@ -245,7 +245,7 @@ class TestStatsSummary:
             StatsAggregator()
             .add_retention(_retention_summary())
             .add_anomalies(_anomaly_summary())
-            .add_feature_impact(_feature_summary())
+            .add_feature_correlation(_feature_summary())
             .build()
         )
 
@@ -391,7 +391,7 @@ class TestIntegration:
         anom_result = AnomalyDetector(sigma_threshold=2.0, window=4).detect(series)
 
         # Features
-        feat_result = FeatureImpactAnalyzer(events, min_feature_users=3).analyze(
+        feat_result = FeatureCorrelationAnalyzer(events, min_feature_users=3).analyze(
             retention_periods=[7, 30]
         )
 
@@ -400,7 +400,7 @@ class TestIntegration:
             StatsAggregator()
             .add_retention(ret_result.to_summary())
             .add_anomalies(anom_result.to_summary())
-            .add_feature_impact(feat_result.to_summary())
+            .add_feature_correlation(feat_result.to_summary())
             .build()
         )
 
@@ -422,20 +422,20 @@ class TestIntegration:
         events = self._make_events()
 
         ret = RetentionComputer(events).compute(periods=[7, 30])
-        feat = FeatureImpactAnalyzer(events, min_feature_users=3).analyze(
+        feat = FeatureCorrelationAnalyzer(events, min_feature_users=3).analyze(
             retention_periods=[7, 30]
         )
 
         strict = (
             StatsAggregator(min_impact_threshold=0.10)
             .add_retention(ret.to_summary())
-            .add_feature_impact(feat.to_summary())
+            .add_feature_correlation(feat.to_summary())
             .build()
         )
         loose = (
             StatsAggregator(min_impact_threshold=0.001)
             .add_retention(ret.to_summary())
-            .add_feature_impact(feat.to_summary())
+            .add_feature_correlation(feat.to_summary())
             .build()
         )
 

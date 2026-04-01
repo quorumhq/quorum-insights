@@ -90,12 +90,16 @@ class RetentionQuery:
 
         where_sql = " AND ".join(where_clauses)
 
-        # Build retention conditions array
+        # Build retention conditions: each checks a BOUNDED time range
+        # so a user active only in week 3 counts for week 3 only, not weeks 0-3.
+        # Condition N: event_date >= cohort_date + N periods AND < cohort_date + (N+1) periods
         retention_conds = []
         for i in range(self.num_periods):
-            interval = interval_tmpl.format(n=i)
+            lo = interval_tmpl.format(n=i)
+            hi = interval_tmpl.format(n=i + 1)
             retention_conds.append(
-                f"ie.event_date >= cohorts.cohort_date + {interval}"
+                f"ie.event_date >= cohorts.cohort_date + {lo} "
+                f"AND ie.event_date < cohorts.cohort_date + {hi}"
             )
 
         retention_args = ",\n            ".join(retention_conds)

@@ -306,7 +306,7 @@ class TestMetricsQuery:
     def test_daily_active_users(self):
         sql, params = self._default().daily_active_users()
         assert "uniqMerge(unique_users)" in sql
-        assert "daily_metrics_mv" in sql
+        assert "daily_metrics" in sql
         assert params["tenant_id"] == "t1"
 
     def test_daily_metrics_by_type(self):
@@ -318,20 +318,20 @@ class TestMetricsQuery:
 
     def test_feature_usage_ranking(self):
         sql, _ = self._default().feature_usage_ranking(limit=20)
-        assert "feature_usage_mv" in sql
+        assert "feature_usage" in sql
         assert "uniqMerge(unique_users)" in sql
         assert "sumMerge(total_ai_cost)" in sql
         assert "LIMIT 20" in sql
 
     def test_feature_trend(self):
         sql, params = self._default().feature_trend("button_click")
-        assert "feature_usage_mv" in sql
+        assert "feature_usage" in sql
         assert params["event_name"] == "button_click"
         assert "ORDER BY event_date" in sql
 
     def test_user_profile(self):
         sql, params = self._default().user_profile("user-123")
-        assert "user_profiles_mv" in sql
+        assert "user_profiles" in sql
         assert params["user_id"] == "user-123"
         assert "minMerge(first_seen)" in sql
         assert "maxMerge(last_seen)" in sql
@@ -341,14 +341,14 @@ class TestMetricsQuery:
 
     def test_user_cohort_info(self):
         sql, params = self._default().user_cohort_info("user-456")
-        assert "user_cohorts_mv" in sql
+        assert "user_cohorts" in sql
         assert params["user_id"] == "user-456"
         assert "minMerge(cohort_date)" in sql
         assert "countMerge(lifetime_events)" in sql
 
     def test_overview(self):
         sql, _ = self._default().overview()
-        assert "daily_metrics_mv" in sql
+        assert "daily_metrics" in sql
         assert "total_events" in sql
         assert "total_users" in sql
         assert "total_ai_events" in sql
@@ -361,8 +361,8 @@ class TestMetricsQuery:
         # recent_events only needs tenant_id, not date range
         assert "start_date" not in params
 
-    def test_all_mv_queries_use_merge_combinators(self):
-        """Every MV query must use -Merge combinators, not plain aggregates."""
+    def test_all_target_queries_use_merge_combinators(self):
+        """Every target table query must use -Merge combinators, not plain aggregates."""
         mq = self._default()
         mv_queries = [
             mq.daily_active_users,

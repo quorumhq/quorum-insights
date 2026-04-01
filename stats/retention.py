@@ -203,13 +203,33 @@ class RetentionComputer:
             retention_rates: dict[int, float] = {}
             retention_counts: dict[int, int] = {}
 
-            for period in periods:
-                returning = (
-                    cohort_df
-                    .filter(pl.col("days_since_first") >= period)
-                    ["user_id"]
-                    .n_unique()
-                )
+            for idx, period in enumerate(periods):
+                # Standard N-day retention: user was active in [period, next_period)
+                # This avoids inflating retention (a user active on day 30
+                # should NOT count as retained for D1 and D7).
+                if idx + 1 < len(periods):
+                    next_period = periods[idx + 1]
+                else:
+                    # Last period: open-ended (active on day >= period)
+                    next_period = None
+
+                if next_period is not None:
+                    returning = (
+                        cohort_df
+                        .filter(
+                            (pl.col("days_since_first") >= period)
+                            & (pl.col("days_since_first") < next_period)
+                        )
+                        ["user_id"]
+                        .n_unique()
+                    )
+                else:
+                    returning = (
+                        cohort_df
+                        .filter(pl.col("days_since_first") >= period)
+                        ["user_id"]
+                        .n_unique()
+                    )
                 retention_counts[period] = returning
                 retention_rates[period] = returning / cohort_users
 

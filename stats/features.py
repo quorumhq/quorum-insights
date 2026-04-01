@@ -1,22 +1,22 @@
 """
-Feature impact correlation analysis.
+Feature–retention correlation analysis.
 
-Answers: "Which features help vs. hurt retention?"
+Answers: "Which features are associated with higher or lower retention?"
+
+IMPORTANT: This is CORRELATION, not causal impact. Users who adopt a feature
+may differ systematically from non-users (self-selection bias). Tenure
+normalization reduces but does not eliminate confounding. For causal claims,
+use A/B testing or propensity score matching.
 
 Algorithm:
 1. For each feature (event_name), split users into used/not-used groups
 2. Compare D7/D30 retention between groups
-3. Normalize for confounders (user tenure, segment, usage volume)
-4. Rank by net retention impact
-5. Flag negative-impact features
-
-Confounder handling:
-- Tenure normalization: only compare users with similar first_date
-- Segment normalization: compute impact within each segment, then average
-- Usage volume: compare at similar activity levels (quintiles)
+3. Normalize for confounders (user tenure via weekly cohort matching)
+4. Rank by net retention correlation
+5. Flag negative-correlation features
 
 Usage:
-    analyzer = FeatureImpactAnalyzer(events_df)
+    analyzer = FeatureCorrelationAnalyzer(events_df)
     result = analyzer.analyze(retention_periods=[7, 30])
     result.to_summary()  # -> dict for LLM engine
 """
@@ -31,7 +31,7 @@ import polars as pl
 
 
 @dataclass
-class FeatureImpact:
+class FeatureCorrelation:
     """Impact analysis for a single feature."""
 
     feature_name: str
@@ -59,7 +59,7 @@ class FeatureImpact:
         return self.normalized_impact[longest] < -0.01  # >1% negative
 
     @property
-    def net_impact_score(self) -> float:
+    def net_correlation_score(self) -> float:
         """Single score for ranking: weighted average of normalized impacts."""
         if not self.normalized_impact:
             return 0.0
@@ -75,33 +75,35 @@ class FeatureImpact:
 
 
 @dataclass
-class FeatureImpactResult:
+class FeatureCorrelationResult:
     """Complete feature impact analysis result."""
 
-    features: list[FeatureImpact]
+    features: list[FeatureCorrelation]
     periods: list[int]
     total_users: int
     total_features: int
     date_range: tuple[date, date]
 
     @property
-    def positive_features(self) -> list[FeatureImpact]:
-        return [f for f in self.features if f.net_impact_score > 0.01]
+    def positive_features(self) -> list[FeatureCorrelation]:
+        return [f for f in self.features if f.net_correlation_score > 0.01]
 
     @property
-    def negative_features(self) -> list[FeatureImpact]:
+    def negative_features(self) -> list[FeatureCorrelation]:
         return [f for f in self.features if f.is_negative]
 
     @property
-    def ranked(self) -> list[FeatureImpact]:
+    def ranked(self) -> list[FeatureCorrelation]:
         """Features ranked by net impact (best first)."""
-        return sorted(self.features, key=lambda f: f.net_impact_score, reverse=True)
+        return sorted(self.features, key=lambda f: f.net_correlation_score, reverse=True)
 
     def to_summary(self) -> dict:
         """Structured summary for the LLM insight engine."""
         ranked = self.ranked
         return {
-            "metric": "feature_impact",
+            "metric": "feature_correlation",
+            "caveat": "Correlation, not causation. Feature users may differ "
+                      "systematically from non-users. Use A/B tests for causal claims.",
             "date_range": {
                 "start": self.date_range[0].isoformat(),
                 "end": self.date_range[1].isoformat(),
@@ -117,7 +119,7 @@ class FeatureImpactResult:
                     "users": f.total_users,
                     "events": f.total_events,
                     "impact": {f"D{p}": round(v, 4) for p, v in f.normalized_impact.items()},
-                    "net_score": round(f.net_impact_score, 4),
+                    "net_score": round(f.net_correlation_score, 4),
                 }
                 for f in ranked[:10]
             ],
@@ -126,14 +128,14 @@ class FeatureImpactResult:
                     "name": f.feature_name,
                     "users": f.total_users,
                     "impact": {f"D{p}": round(v, 4) for p, v in f.normalized_impact.items()},
-                    "net_score": round(f.net_impact_score, 4),
+                    "net_score": round(f.net_correlation_score, 4),
                 }
                 for f in self.negative_features
             ],
         }
 
 
-class FeatureImpactAnalyzer:
+class FeatureCorrelationAnalyzer:
     """Compute feature impact on retention.
 
     Expects a polars DataFrame with at minimum:
@@ -169,7 +171,7 @@ class FeatureImpactAnalyzer:
         retention_periods: list[int] | None = None,
         segment_column: str | None = None,
         exclude_events: list[str] | None = None,
-    ) -> FeatureImpactResult:
+    ) -> FeatureCorrelationResult:
         """Analyze feature impact on retention.
 
         Args:
@@ -183,7 +185,7 @@ class FeatureImpactAnalyzer:
         df = self._df.filter(pl.col("user_id") != "")
 
         if df.is_empty():
-            return FeatureImpactResult(
+            return FeatureCorrelationResult(
                 features=[], periods=retention_periods, total_users=0,
                 total_features=0, date_range=(date.today(), date.today()),
             )
@@ -246,7 +248,7 @@ class FeatureImpactAnalyzer:
             .unique()
         )
 
-        results: list[FeatureImpact] = []
+        results: list[FeatureCorrelation] = []
 
         for row in features_list.iter_rows(named=True):
             feat_name = row["event_name"]
@@ -306,7 +308,7 @@ class FeatureImpactAnalyzer:
                     avg_ai_quality = ai_events["ai_quality_score"].mean()
                     ai_event_pct = len(ai_events) / len(feat_events)
 
-            results.append(FeatureImpact(
+            results.append(FeatureCorrelation(
                 feature_name=feat_name,
                 total_users=feat_user_count,
                 total_events=feat_event_count,
@@ -318,7 +320,7 @@ class FeatureImpactAnalyzer:
                 ai_event_pct=ai_event_pct,
             ))
 
-        return FeatureImpactResult(
+        return FeatureCorrelationResult(
             features=results,
             periods=retention_periods,
             total_users=total_users,
