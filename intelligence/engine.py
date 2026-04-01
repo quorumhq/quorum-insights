@@ -88,10 +88,12 @@ class InsightEngine:
         # Serialize summary for prompt + cache key
         summary_text = json.dumps(stats_summary, indent=2, default=str)
 
-        # Check cache
+        # Check cache (key includes prompt version + model + summary)
         cache_key = None
         if self._cache:
-            cache_key = self._cache.cache_key(self.config.prompt_version, summary_text)
+            cache_key = self._cache.cache_key(
+                self.config.prompt_version, summary_text, self.config.model,
+            )
             cached = self._cache.get(cache_key)
             if cached:
                 logger.info("Cache hit for key %s", cache_key)
@@ -189,8 +191,80 @@ class InsightEngine:
         return cards
 
 
+# JSON Schema for InsightCard (used by Claude tool_use)
+INSIGHT_CARDS_TOOL = {
+    "name": "submit_insight_cards",
+    "description": (
+        "Submit a ranked list of product analytics insight cards. "
+        "Each card must have specific, data-grounded findings."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "cards": {
+                "type": "array",
+                "description": "3-7 insight cards ranked by importance",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "Concise title under 80 chars",
+                        },
+                        "severity": {
+                            "type": "string",
+                            "enum": ["critical", "high", "medium", "low", "info"],
+                        },
+                        "finding": {
+                            "type": "string",
+                            "description": "What the data shows, 2-3 sentences with numbers",
+                        },
+                        "evidence": {
+                            "type": "string",
+                            "description": "Which specific metrics support this",
+                        },
+                        "action": {
+                            "type": "string",
+                            "description": "Specific next step, not generic advice",
+                        },
+                        "confidence": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "Statistical confidence 0-1",
+                        },
+                        "category": {
+                            "type": "string",
+                            "enum": ["retention", "anomaly", "feature_correlation", "overview"],
+                        },
+                        "estimated_impact": {
+                            "type": "string",
+                            "description": "Estimated business impact of the action",
+                        },
+                        "related_metrics": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Metric names involved",
+                        },
+                    },
+                    "required": [
+                        "title", "severity", "finding", "evidence",
+                        "action", "confidence", "category",
+                    ],
+                },
+            },
+        },
+        "required": ["cards"],
+    },
+}
+
+
 class AnthropicClient:
-    """LLM client using the Anthropic Python SDK.
+    """LLM client using Claude tool_use for guaranteed structured output.
+
+    Uses tool_choice to force Claude to call submit_insight_cards,
+    which returns schema-validated JSON. This is Anthropic's recommended
+    approach for structured output (not raw JSON prompting).
 
     Usage:
         import anthropic
@@ -210,10 +284,26 @@ class AnthropicClient:
             max_tokens=4096,
             system=system,
             messages=[{"role": "user", "content": user}],
+            tools=[INSIGHT_CARDS_TOOL],
+            tool_choice={"type": "tool", "name": "submit_insight_cards"},
         )
-        text = response.content[0].text
+
         usage = {
             "input": response.usage.input_tokens,
             "output": response.usage.output_tokens,
         }
+
+        # Extract structured data from tool_use block
+        for block in response.content:
+            if block.type == "tool_use" and block.name == "submit_insight_cards":
+                # block.input is already a parsed dict from the API
+                cards_data = block.input.get("cards", [])
+                return json.dumps(cards_data), usage
+
+        # Fallback: no tool_use block found (shouldn't happen with tool_choice)
+        logger.warning("No tool_use block in Claude response, falling back to text")
+        text = next(
+            (b.text for b in response.content if hasattr(b, "text")),
+            "[]",
+        )
         return text, usage

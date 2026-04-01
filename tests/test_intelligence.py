@@ -203,15 +203,29 @@ class TestInsightCache:
 
     def test_cache_key_different_versions(self, tmp_path):
         cache = InsightCache(tmp_path / "cache")
-        k1 = cache.cache_key("v1", "summary A")
-        k2 = cache.cache_key("v2", "summary A")
+        k1 = cache.cache_key("v1", "summary A", "model-a")
+        k2 = cache.cache_key("v2", "summary A", "model-a")
         assert k1 != k2
 
     def test_cache_key_different_summaries(self, tmp_path):
         cache = InsightCache(tmp_path / "cache")
-        k1 = cache.cache_key("v1", "summary A")
-        k2 = cache.cache_key("v1", "summary B")
+        k1 = cache.cache_key("v1", "summary A", "model-a")
+        k2 = cache.cache_key("v1", "summary B", "model-a")
         assert k1 != k2
+
+    def test_cache_key_different_models(self, tmp_path):
+        cache = InsightCache(tmp_path / "cache")
+        k1 = cache.cache_key("v1", "summary A", "claude-sonnet")
+        k2 = cache.cache_key("v1", "summary A", "gpt-4o")
+        assert k1 != k2
+
+    def test_cache_ttl_expiry(self, tmp_path):
+        import time
+        cache = InsightCache(tmp_path / "cache", ttl_seconds=1)
+        cache.put("k1", "response", "v1", "model")
+        assert cache.get("k1") == "response"  # fresh
+        time.sleep(1.1)
+        assert cache.get("k1") is None  # expired
 
     def test_cache_clear(self, tmp_path):
         cache = InsightCache(tmp_path / "cache")

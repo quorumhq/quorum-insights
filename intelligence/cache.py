@@ -29,28 +29,39 @@ class CacheEntry:
 class InsightCache:
     """File-based content-addressable cache for LLM responses."""
 
-    def __init__(self, cache_dir: Path | str | None = None):
+    def __init__(self, cache_dir: Path | str | None = None, ttl_seconds: int = 86400):
         if cache_dir is None:
             self._dir = Path.home() / ".cache" / "quorum-insights"
         else:
             self._dir = Path(cache_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._ttl = ttl_seconds  # default 24 hours
 
-    def cache_key(self, prompt_version: str, stats_summary: str) -> str:
-        """SHA-256 of prompt version + normalized summary."""
-        content = f"{prompt_version}:{stats_summary}"
+    def cache_key(self, prompt_version: str, stats_summary: str, model: str = "") -> str:
+        """SHA-256 of prompt version + model + normalized summary."""
+        content = f"{prompt_version}:{model}:{stats_summary}"
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
     def get(self, key: str) -> Optional[str]:
-        """Get cached response JSON, or None if miss."""
+        """Get cached response JSON, or None if miss or expired."""
+        import time
+
         path = self._dir / f"{key}.json"
-        if path.exists():
-            try:
-                data = json.loads(path.read_text())
-                return data.get("response_json")
-            except (json.JSONDecodeError, KeyError):
+        if not path.exists():
+            return None
+
+        # Check TTL via file mtime
+        if self._ttl > 0:
+            age = time.time() - path.stat().st_mtime
+            if age > self._ttl:
+                path.unlink(missing_ok=True)
                 return None
-        return None
+
+        try:
+            data = json.loads(path.read_text())
+            return data.get("response_json")
+        except (json.JSONDecodeError, KeyError):
+            return None
 
     def put(self, key: str, response_json: str, prompt_version: str, model: str) -> None:
         """Store a response in the cache."""
