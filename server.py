@@ -79,16 +79,62 @@ class DataStore:
         events_file = os.environ.get("EVENTS_FILE")
         if events_file and Path(events_file).exists():
             logger.info("Loading events from %s", events_file)
-            return self._load_from_file(events_file)
+            if events_file.endswith(".csv"):
+                return self._load_from_csv(events_file)
+            return self._load_from_jsonl(events_file)
 
         logger.warning("No EVENTS_FILE set. Using empty dataset. Set EVENTS_FILE=path/to/events.jsonl")
+        return self._empty()
+
+    @staticmethod
+    def _empty() -> pl.DataFrame:
         return pl.DataFrame({
             "user_id": pl.Series([], dtype=pl.Utf8),
             "event_date": pl.Series([], dtype=pl.Date),
             "event_name": pl.Series([], dtype=pl.Utf8),
         })
 
-    def _load_from_file(self, path: str) -> pl.DataFrame:
+    def _load_from_csv(self, path: str) -> pl.DataFrame:
+        """Load from REES46/ecommerce CSV (or any CSV with event_time, event_type, user_id).
+
+        For large datasets (>10M rows), samples to MAX_USERS to keep
+        stats computation interactive (<15s per endpoint).
+        """
+        max_users = int(os.environ.get("MAX_USERS", "200000"))
+
+        try:
+            df = pl.read_csv(
+                path,
+                columns=["event_time", "event_type", "user_id", "category_code"],
+                dtypes={"user_id": pl.Utf8, "category_code": pl.Utf8},
+                n_rows=None,
+                ignore_errors=True,
+            )
+            # Parse event_time → date
+            df = df.with_columns(
+                pl.col("event_time").str.slice(0, 10).str.to_date().alias("event_date"),
+                pl.col("event_type").alias("event_name"),
+            ).select("user_id", "event_date", "event_name")
+
+            n_users = df["user_id"].n_unique()
+            if n_users > max_users:
+                logger.info(
+                    "Sampling %d users from %d (set MAX_USERS to increase)",
+                    max_users, n_users,
+                )
+                sampled_ids = (
+                    df.select("user_id").unique()
+                    .sample(n=max_users, seed=42)
+                )
+                df = df.join(sampled_ids, on="user_id", how="semi")
+
+            logger.info("Loaded %d events, %d users from CSV", len(df), df["user_id"].n_unique())
+            return df
+        except Exception as e:
+            logger.error("Failed to load CSV: %s", e)
+            return self._empty()
+
+    def _load_from_jsonl(self, path: str) -> pl.DataFrame:
         rows = []
         for line in Path(path).read_text().splitlines():
             line = line.strip()
@@ -107,11 +153,7 @@ class DataStore:
                 continue
 
         if not rows:
-            return pl.DataFrame({
-                "user_id": pl.Series([], dtype=pl.Utf8),
-                "event_date": pl.Series([], dtype=pl.Date),
-                "event_name": pl.Series([], dtype=pl.Utf8),
-            })
+            return self._empty()
         return pl.DataFrame(rows)
 
 

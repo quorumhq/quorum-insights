@@ -293,10 +293,14 @@ class FeatureCorrelationAnalyzer:
                 retention_non_users_dict[period] = rate_without
 
             # Normalized impact (tenure-adjusted)
-            normalized = self._normalize_impact(
-                df, user_first, users_with, users_without,
-                retention_periods, segment_column,
-            )
+            # Skip expensive normalization for large datasets (>50K users)
+            if total_users <= 50000:
+                normalized = self._normalize_impact(
+                    df, user_first, users_with, users_without,
+                    retention_periods, segment_column,
+                )
+            else:
+                normalized = retention_impact  # use raw correlation for perf
 
             # AI quality
             avg_ai_quality = None

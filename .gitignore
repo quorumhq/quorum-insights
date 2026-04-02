@@ -8,3 +8,5 @@ dist/
 build/
 insights-spec.md
 insights-actions-amendments.md
+data/
+demo_events.jsonl
