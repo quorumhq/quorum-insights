@@ -55,25 +55,43 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+def preload_data():
+    """Load data on startup so first request doesn't wait 25s."""
+    import threading
+    def _load():
+        df = _store.get_events()
+        logger.info("Preloaded %d events on startup", len(df))
+    threading.Thread(target=_load, daemon=True).start()
+
+
 # ─── Data Loading ───
 
 
 class DataStore:
-    """Lazy-loaded, cached event data."""
+    """Lazy-loaded, cached event data. Thread-safe."""
 
     def __init__(self):
         self._df: Optional[pl.DataFrame] = None
         self._loaded_at: float = 0
-        self._ttl = 300  # reload every 5 minutes
+        self._ttl = 3600  # reload every hour (was 5min — too aggressive for large CSVs)
+        self._loading = False
+        import threading
+        self._lock = threading.Lock()
 
     def get_events(self) -> pl.DataFrame:
         now = time.time()
         if self._df is not None and (now - self._loaded_at) < self._ttl:
             return self._df
 
-        self._df = self._load()
-        self._loaded_at = now
-        return self._df
+        with self._lock:
+            # Double-check after acquiring lock (another thread may have loaded)
+            if self._df is not None and (time.time() - self._loaded_at) < self._ttl:
+                return self._df
+
+            self._df = self._load()
+            self._loaded_at = time.time()
+            return self._df
 
     def _load(self) -> pl.DataFrame:
         events_file = os.environ.get("EVENTS_FILE")
